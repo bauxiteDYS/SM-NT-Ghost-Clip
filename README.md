@@ -1,5 +1,5 @@
 # SM-NT-Ghost-Clip
-Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axis-aligned bounding box volumes where the ghost cannot be dropped into
+Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axis-aligned bounding box volumes where the ghost cannot be dropped into, such as by throwing it or explosive forces
 
 # How it works  
 - When a player picks up the Ghost and is touching the ground, that point will continously be updated as the last known valid position for the ghost
