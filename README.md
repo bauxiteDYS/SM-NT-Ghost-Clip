@@ -10,9 +10,9 @@ Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axi
 - Ghost can still be held inside a Ghost Clip volume currently, it is not forcibly dropped
 - More than 32 volumes are not supported
 
-# How to setup zones  
+# How to setup Ghost Clip volumes
 
-- The first method overrides the second
+- The first method overrides the second - meaning if the map has the triggers, the server config file will do nothing
   
 ## Method 1 - Place triggers in Hammer
 - Make `trigger_multiple` entities with a `targetname` key that starts with and includes `ghost_clip` e.g. `ghost_clip_area1` where you want the Ghost Clip volume to be
