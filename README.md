@@ -10,6 +10,9 @@ Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axi
 - More than 32 volumes are not supported
 
 # How to setup zones  
+
+- The first method overrides the second
+  
 ## Method 1 - Place triggers in Hammer
 - Make `trigger_multiple` entities with a `targetname` key that starts with and includes `ghost_clip` e.g. `ghost_clip_area1` where you want the Ghost Clip volume to be
 - Make sure it is axis-aligned, i.e. not rotated at all in hammer and rectangular in shape, no complex shapes
