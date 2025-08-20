@@ -10,11 +10,18 @@ Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axi
 - More than 32 volumes are not supported
 
 # How to setup zones  
+## Method 1 - Place triggers in Hammer
+- Make `trigger_multiple` entities with a `targetname` key that starts with and includes `ghost_clip` e.g. `ghost_clip_area1` where you want the Ghost Clip volume to be
+- Make sure it is axis-aligned, i.e. not rotated at all in hammer and rectangular in shape, no complex shapes
+- Make sure each different trigger solid is a different entity, don't combine seperate solids into one `trigger_multiple`
+
+## Method 2 - Add the areas to the SM config file
 - Use hammer or in-game commands like `cl_showpos` to get the min and max coordinates such as:
 `"min" "-1321.0 -724.0 -1279.0"` - `"max" "1137.0 1212.0 -1215.0"`
+- Have a server operator add it to the SM config file
 
-# How to add it to the server  
-- Sourcemod >= 1.11 is recommended
+# How to add the plugin to the server  
+- Sourcemod >= 1.11 is recommended and probably required
 - Add the plugin and the text file with the Ghost Clip volumes into the appropriate folders on the server
 - You must modify the text file with volumes for each map, under a section named after that exact map:
 ```
