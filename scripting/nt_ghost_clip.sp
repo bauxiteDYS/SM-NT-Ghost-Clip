@@ -16,6 +16,7 @@ char g_teleSound[] = "gameplay/ghost_pickup.wav";
 char g_mapName[32];
 
 float g_lastSound;
+float g_oldGhostPos[3] = {76543.0, 76543.0, 76543.0}; //impossible coordinates
 float g_lastTelePos[3];
 float g_ghostSpawnPos[3];
 float g_ghostLastSafePos[3];
@@ -32,9 +33,9 @@ bool g_lateLoad;
 
 public Plugin myinfo = {
 	name = "NT Ghost Clip",
-	description = "Provides the ability to setup rectangular volumes where the ghost cannot be dropped into",
+	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.1.0",
+	version = "0.2.0",
 	url = "",
 };
 
@@ -48,6 +49,7 @@ public void OnPluginStart()
 {
 	#if DEBUG
 	RegConsoleCmd("sm_fghost", FindGhostCommand);
+	RegConsoleCmd("sm_fvec", FindVec);
 	#endif
 	
 	if(g_lateLoad)
@@ -60,6 +62,51 @@ public void OnPluginStart()
 public Action FindGhostCommand(int client, int args)
 {
 	FindTheGhost();
+	
+	return Plugin_Handled;
+}
+
+public Action FindVec(int client, int args)
+{
+	PrintToServer("finding ent");
+	
+	g_ghostClipAreaCount = 0;
+	
+	int ent = -1;
+	char buffer[64];
+	
+	while ((ent = FindEntityByClassname(ent, "trigger_multiple")) != -1)
+	{
+		if (g_ghostClipAreaCount > MAX_GHOST_AREAS)
+		{
+			LogError("%s Error: More than 32 areas in GhostClip file", g_tag);
+			break;
+		}
+				
+		GetEntPropString(ent, Prop_Data, "m_iName", buffer, sizeof(buffer));
+		
+		if (StrContains(buffer, "ghost_clip", false) == 0)
+		{
+			PrintToServer("found ent %d", ent);
+		
+			float origin[3], mins[3], maxs[3];
+			
+			GetEntPropVector(ent, Prop_Data, "m_vecOrigin", origin);
+			GetEntPropVector(ent, Prop_Data, "m_vecMins", mins);
+			GetEntPropVector(ent, Prop_Data, "m_vecMaxs", maxs);
+	
+			PrintToServer("Trigger %d: mins %.1f %.1f %.1f  maxs %.1f %.1f %.1f origin: %.1f %.1f %.1f", 
+			ent, mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], origin[0], origin[1], origin[2]);
+			
+			for (int i = 0; i < 3; i++)
+			{
+				g_ghostClipAreasMins[g_ghostClipAreaCount][i] = origin[i] + mins[i];
+				g_ghostClipAreasMaxs[g_ghostClipAreaCount][i] = origin[i] + maxs[i];
+			}
+			
+			g_ghostClipAreaCount++;
+		}
+	}
 	
 	return Plugin_Handled;
 }
@@ -78,13 +125,20 @@ public void OnGameFrame()
 		
 		if(!(oldPos[0] == ghostPos[0] && oldPos[1] == ghostPos[1] && oldPos[2] == ghostPos[2]))
 		{
-			oldPos[0] = ghostPos[0];
-			oldPos[1] = ghostPos[1];
-			oldPos[2] = ghostPos[2];
+			for(int i = 0; i < 3; i++)
+			{
+				oldPos[i] = ghostPos[i];
+			}
+			
 			PrintToServer("%s GHOST HAS MOVED - %d", g_tag, GetGameTickCount());
 		}
 	}
 	#endif
+	
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
 	
 	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost))
 	{
@@ -96,28 +150,42 @@ public void OnGameFrame()
 
 void CheckGhostPos()
 {
+	bool spawnTele;
 	float ghostPos[3];
 
 	GetEntPropVector(g_ghost, Prop_Data, "m_vecAbsOrigin", ghostPos);
+			
+	if((g_oldGhostPos[0] == ghostPos[0] && g_oldGhostPos[1] == ghostPos[1] && g_oldGhostPos[2] == ghostPos[2]))
+	{
+		//if the ghost hasn't moved from last check, no need to recheck all areas
+		
+		#if DEBUG
+		static float lastPrint;
+		if(GetGameTime() < lastPrint + 3.0)
+		{
+			return;
+		}
+		PrintToServer("%s Ghost Hasn't Moved - %d", g_tag, GetGameTickCount());
+		lastPrint = GetGameTime();
+		#endif
+		
+		return;
+	}
 	
-	// maybe we check if its in the spawn origin
-	// or simply forget working around the ghost spawning in a clip
-	// or check if a valid position was recorded and if not do nothing
-	// could also check if its being teled to the same place as before and do nothing
+	for(int i = 0; i < 3; i++)
+	{
+		g_oldGhostPos[i] = ghostPos[i];
+	}
 	
+	#if DEBUG
+	PrintToServer("%s Checking Ghost pos - %d", g_tag, GetGameTickCount());
+	#endif
+		
 	if (IsInsideArea(ghostPos))
 	{
 		#if DEBUG
 		PrintToServer("%d is inside an area - %d", g_ghost, GetGameTickCount());
 		#endif
-		
-		// dont teleport into another ghostclip tho somehow ?
-		// - only valid tele spots are where client was and round start origin/spawn 
-		// so this should not be a problem as we check client before recording
-		// or dont teleport if no spawn origin or round start origin, - but we shud always have this?
-		// altho this can possibly be 0,0,0 if the ghost was somehow there so cant exclude this
-		// but since we always record spawn and round start origin this shud be fine to tele
-		// problem is if ghost spawns inside a ghost clip zone...
 
 		if(g_recordedSafePos)
 		{
@@ -130,11 +198,11 @@ void CheckGhostPos()
 				g_lastTelePos[i] = g_ghostLastSafePos[i];
 			}
 			
-			g_doneTeleOnce = true;
 		}
-		else
+		else // we dont have a recorded valid pos, doesnt mean ghost spawned in a clip though
 		{
 			// if we teled the ghost to spawn before and have no valid last safe pos, 
+			// and also it didn't move from spawn pos
 			// just leave it, its probably stuck in a loop due to spawn being in a clip zone
 			
 			if(	g_doneTeleOnce 	&& 	g_lastTelePos[0] == g_ghostSpawnPos[0]
@@ -157,8 +225,12 @@ void CheckGhostPos()
 				g_lastTelePos[i] = g_ghostSpawnPos[i];
 			}
 			
-			g_doneTeleOnce = true;
+			spawnTele = true;
 		}
+		
+		#if DEBUG
+		PrintToServer("%s Teleporting", g_tag);
+		#endif
 		
 		SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
 		// could be exploitable somehow since it doesnt respond to explosives, lets reset it after 3s?
@@ -181,9 +253,14 @@ void CheckGhostPos()
 		
 		if(GetGameTime() > g_lastSound + 1.0)
 		{
-			g_lastSound = GetGameTime();
-			EmitSoundToAll(g_teleSound, _, _, _, _, 0.6, 190);
+			if(g_doneTeleOnce || !spawnTele)
+			{
+				g_lastSound = GetGameTime();
+				EmitSoundToAll(g_teleSound, _, _, _, _, 0.6, 190);
+			}
 		}
+		
+		g_doneTeleOnce = true;
 	}
 }
 
@@ -231,11 +308,12 @@ public void OnMapStart()
 {
 	PrecacheSound(g_teleSound);
 	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+	LoadGhostClips();
 }
 
 public Action RecordGhosterPos(Handle timer)
 {
-	if(g_ghost <= 0 || !g_ghostCarried || !IsValidEntity(g_ghost))
+	if(g_ghostClipAreaCount == 0 || g_ghost <= 0 || !g_ghostCarried || !IsValidEntity(g_ghost))
 	{
 		return Plugin_Continue;
 	}
@@ -281,7 +359,7 @@ public Action RecordGhosterPos(Handle timer)
 
 public void OnMapInit()
 {
-	LoadGhostClips();
+	//LoadGhostClips(); // can't check ents here...need to use mapstart
 	
 	if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
 	{
@@ -291,9 +369,58 @@ public void OnMapInit()
 
 public void LoadGhostClips()
 {
-	GetCurrentMap(g_mapName, sizeof(g_mapName));
-		
+	#if DEBUG
+	PrintToServer("%s Finding Ghost Clip triggers", g_tag);
+	#endif
+	
 	g_ghostClipAreaCount = 0;
+	
+	int ent = -1;
+	char buffer[64];
+	
+	while ((ent = FindEntityByClassname(ent, "trigger_multiple")) != -1)
+	{
+		if (g_ghostClipAreaCount >= MAX_GHOST_AREAS)
+		{
+			LogError("%s Error: More than 32 areas in GhostClip file", g_tag);
+			break;
+		}
+				
+		GetEntPropString(ent, Prop_Data, "m_iName", buffer, sizeof(buffer));
+		
+		if (StrContains(buffer, "ghost_clip", false) == 0)
+		{
+			float origin[3], mins[3], maxs[3];
+			
+			GetEntPropVector(ent, Prop_Data, "m_vecOrigin", origin);
+			GetEntPropVector(ent, Prop_Data, "m_vecMins", mins);
+			GetEntPropVector(ent, Prop_Data, "m_vecMaxs", maxs);
+			
+			#if DEBUG
+			PrintToServer("Trigger %d: mins %.1f %.1f %.1f  maxs %.1f %.1f %.1f origin: %.1f %.1f %.1f", 
+			ent, mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], origin[0], origin[1], origin[2]);
+			#endif
+			
+			for (int i = 0; i < 3; i++)
+			{
+				g_ghostClipAreasMins[g_ghostClipAreaCount][i] = origin[i] + mins[i];
+				g_ghostClipAreasMaxs[g_ghostClipAreaCount][i] = origin[i] + maxs[i];
+			}
+			
+			g_ghostClipAreaCount++;
+		}
+	}
+	
+	if(g_ghostClipAreaCount > 0)
+	{	
+		return; // we found ghost triggers we wont try to load anything from the cfg file
+	}
+	
+	#if DEBUG
+	PrintToServer("%s Did not find any triggers, looking in cfg file", g_tag);
+	#endif
+	
+	GetCurrentMap(g_mapName, sizeof(g_mapName));
 	
 	KeyValues kv = new KeyValues("GhostClips");
   
@@ -302,7 +429,9 @@ public void LoadGhostClips()
 	
 	if (!kv.ImportFromFile(path))
 	{
+		#if !DEBUG
 		SetFailState("%s Error: Ghost clip file not found", g_tag);
+		#endif
 	}
 	
 	#if DEBUG
@@ -315,7 +444,7 @@ public void LoadGhostClips()
 		{
 			do
 			{
-				if (g_ghostClipAreaCount > MAX_GHOST_AREAS)
+				if (g_ghostClipAreaCount >= MAX_GHOST_AREAS)
 				{
 					LogError("%s Error: More than 32 areas in GhostClip file", g_tag);
 					break;
@@ -343,12 +472,16 @@ public void LoadGhostClips()
 		}
 		else
 		{
+			#if !DEBUG
 			SetFailState("%s Map had no areas defined in GhostClip file", g_tag);
+			#endif
 		}
 	}
 	else
 	{
+		#if !DEBUG
 		SetFailState("%s Map not found in GhostClip file", g_tag);
+		#endif
 	}
 	
 	delete kv;
@@ -367,6 +500,11 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 	PrintToServer("%s Round Start", g_tag);
 	#endif
 	
+	for(int i = 0; i < 3; i++)
+	{
+		g_oldGhostPos[i] = 76543.0;
+	}
+	
 	g_ghostCarried = false; // its not carried yet
 	g_recordedSafePos = false;
 	g_doneTeleOnce = false;
@@ -377,10 +515,16 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 
 public void OnMapEnd()
 {
+	g_ghostClipAreaCount = 0;
 	g_ghost = -1;
 	g_ghostCarried = false;
 	g_recordedSafePos = false;
 	g_doneTeleOnce = false;
+	
+	for(int i = 0; i < 3; i++)
+	{
+		g_oldGhostPos[i] = 76543.0;
+	}
 }
 
 public void OnGhostSpawn(int ghost)
@@ -404,8 +548,6 @@ public Action FindGhostTimer(Handle timer)
 
 void FindTheGhost()
 {
-	// do we need to get the ghost pos when it stops moving and then store that
-	
 	int ghost = FindEntityByClassname(-1, "weapon_ghost");
 	
 	if(ghost <= 0)
