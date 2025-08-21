@@ -1,6 +1,4 @@
 #include <sourcemod>
-#include <sdktools>
-#include <sdkhooks>
 #include <neotokyo>
 
 #pragma semicolon 1
@@ -35,7 +33,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.2.0",
+	version = "0.2.1",
 	url = "",
 };
 
@@ -198,6 +196,8 @@ void CheckGhostPos()
 				g_lastTelePos[i] = g_ghostLastSafePos[i];
 			}
 			
+			spawnTele = false;
+			
 		}
 		else // we dont have a recorded valid pos, doesnt mean ghost spawned in a clip though
 		{
@@ -253,7 +253,11 @@ void CheckGhostPos()
 		
 		if(GetGameTime() > g_lastSound + 1.0)
 		{
-			if(g_doneTeleOnce || !spawnTele)
+			// we can skip the first tele to spawntele sound, usually happens if ghost spawns in a clip
+			// but it could happen if nobody picks ghost up and somehow it enters a clip also
+			// explosions or shooting so idk if this is a good idea...
+			
+			if(g_doneTeleOnce || !spawnTele) 
 			{
 				g_lastSound = GetGameTime();
 				EmitSoundToAll(g_teleSound, _, _, _, _, 0.6, 190);
