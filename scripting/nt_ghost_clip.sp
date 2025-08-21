@@ -196,7 +196,7 @@ void CheckGhostPos()
 				g_lastTelePos[i] = g_ghostLastSafePos[i];
 			}
 			
-			spawnTele = false;
+			//spawnTele = false; // dont need this as it's already false
 			
 		}
 		else // we dont have a recorded valid pos, doesnt mean ghost spawned in a clip though
