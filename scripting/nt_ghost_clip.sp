@@ -1,10 +1,11 @@
 #include <sourcemod>
+#include <sdkhooks>
 #include <neotokyo>
 
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG false
+#define DEBUG true
 #define MAX_GHOST_AREAS 32
 
 Handle g_moveTimer;
@@ -13,6 +14,7 @@ char g_tag[] = "[Ghost Clip]";
 char g_teleSound[] = "gameplay/ghost_pickup.wav";
 char g_mapName[32];
 
+float g_freezeGhostPos[3];
 float g_lastSound;
 float g_oldGhostPos[3] = {76543.0, 76543.0, 76543.0}; //impossible coordinates
 float g_lastTelePos[3];
@@ -24,6 +26,7 @@ float g_ghostClipAreasMaxs[MAX_GHOST_AREAS][3];
 int g_ghost = -1;
 int g_ghostClipAreaCount;
 
+bool g_freezeGhost;
 bool g_ghostCarried;
 bool g_recordedSafePos;
 bool g_doneTeleOnce;
@@ -144,12 +147,22 @@ public void OnGameFrame()
 		return;
 	}
 	
+	if(g_freezeGhost)
+	{
+		FreezeGhost();
+	}
+	
 	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost))
 	{
 		return;
 	}
 	
 	CheckGhostPos();
+}
+
+void FreezeGhost()
+{
+	TeleportEntity(g_ghost, g_freezeGhostPos, {0.0, 90.0, 270.0}, {0.0, 0.0, 0.0});
 }
 
 void CheckGhostPos()
@@ -182,7 +195,12 @@ void CheckGhostPos()
 	}
 	
 	#if DEBUG
-	PrintToServer("%s Checking Ghost pos - %d", g_tag, GetGameTickCount());
+	static float lastPrint;
+	if(GetGameTime() < lastPrint + 3.0)
+	{
+		PrintToServer("%s Checking Ghost pos - %d", g_tag, GetGameTickCount());
+		lastPrint = GetGameTime();
+	}
 	#endif
 		
 	if (IsInsideArea(ghostPos))
@@ -242,7 +260,25 @@ void CheckGhostPos()
 		PrintToServer("%s Teleporting", g_tag);
 		#endif
 		
-		SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
+		g_freezeGhost = true;
+		
+		if(spawnTele)
+		{
+			g_freezeGhostPos[0] = g_ghostSpawnPos[0];
+			g_freezeGhostPos[1] = g_ghostSpawnPos[1];
+			g_freezeGhostPos[2] = g_ghostSpawnPos[2];
+		}
+		else
+		{
+			g_freezeGhostPos[0] = g_ghostLastSafePos[0];
+			g_freezeGhostPos[1] = g_ghostLastSafePos[1];
+			g_freezeGhostPos[2] = g_ghostLastSafePos[2];
+		}
+		
+		//SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
+		//SetEntPropFloat(g_ghost, Prop_Data, "m_flGravity
+		
+		//SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
 		// could be exploitable somehow since it doesnt respond to explosives, lets reset it after 3s?
 		// seems to hold 0 grav after 3s but still able to be moved by explosives... better way to achieve this?
 		
@@ -259,7 +295,7 @@ void CheckGhostPos()
 		PrintToServer("%s Creating move timer", g_tag);
 		#endif
 	
-		g_moveTimer = CreateTimer(3.0, ResetGhostMoveType, _, TIMER_FLAG_NO_MAPCHANGE);
+		//g_moveTimer = CreateTimer(3.0, ResetGhostMoveType, _, TIMER_FLAG_NO_MAPCHANGE);
 		
 		if(GetGameTime() > g_lastSound + 1.0)
 		{
@@ -277,9 +313,11 @@ void CheckGhostPos()
 		g_doneTeleOnce = true;
 	}
 }
-
+	
 public Action ResetGhostMoveType(Handle timer)
 {
+	// bug: when it wakes up it will immediately fall to the floor in 1 tick bypassing all checks
+	
 	if(g_ghost <= 0 || !IsValidEntity(g_ghost))
 	{
 		return Plugin_Stop;
@@ -514,6 +552,8 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 	PrintToServer("%s Round Start", g_tag);
 	#endif
 	
+	g_freezeGhost = false;
+	
 	for(int i = 0; i < 3; i++)
 	{
 		g_oldGhostPos[i] = 76543.0;
@@ -531,6 +571,7 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 
 public void OnMapEnd()
 {
+	g_freezeGhost = false;
 	g_ghostClipAreaCount = 0;
 	g_ghost = -1;
 	g_ghostCarried = false;
@@ -552,6 +593,7 @@ public void OnGhostSpawn(int ghost)
 	PrintToServer("%s Ghost spawned %d!", g_tag, ghost);
 	#endif
 	
+	g_freezeGhost = false;
 	g_ghostCarried = false; // its not carried yet - might be carried again upon spawn finish
 	CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
 }
@@ -581,7 +623,20 @@ void FindTheGhost()
 		PrintToServer("%d %f %f %f", g_ghost, g_ghostSpawnPos[0], g_ghostSpawnPos[1], g_ghostSpawnPos[2]);
 		PrintToServer("ghost found");
 		#endif
+		
+		if(!SDKHookEx(g_ghost, SDKHook_OnTakeDamage, OnGhostDamage))
+		{
+			PrintToServer("%s Error hooking ghost damage", g_tag);
+		}
 	}
+}
+public Action OnGhostDamage(int victim, int& attacker, int& inflictor, float& damage, int& damagetype, int& weapon, float damageForce[3], float damagePosition[3])
+{
+	g_freezeGhost = false;
+	
+	PrintToServer("%s Ghost was DAMAGED!", g_tag);
+	
+	return Plugin_Continue;
 }
 
 public void OnGhostPickUp(int carrier)
@@ -590,6 +645,7 @@ public void OnGhostPickUp(int carrier)
 	PrintToChatAll("%N (%d) picked up the ghost!", carrier, carrier);
 	#endif
 	
+	g_freezeGhost = false;
 	g_ghostCarried = true;
 }
 
@@ -599,6 +655,7 @@ public void OnGhostDrop(int client)
 	PrintToChatAll("%N (%d) dropped the ghost!", client, client);
 	#endif
 	
+	g_freezeGhost = false;
 	g_ghostCarried = false;
 }
 
@@ -608,5 +665,6 @@ public void OnGhostCapture(int client)
 	PrintToChatAll("%N (%d) retrieved the ghost!", client, client);
 	#endif
 	
+	g_freezeGhost = false;
 	g_ghost = -1;
 }
