@@ -278,7 +278,7 @@ bool IsInsideArea(float pos[3])
 public void OnMapStart()
 {
 	PrecacheSound(g_teleSound);
-	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT); // move this to loadclips so we dont need to fail the plugin
 	LoadGhostClips(); // can't detect trigger vecs on mapinit
 }
 
