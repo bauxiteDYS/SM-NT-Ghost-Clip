@@ -4,8 +4,7 @@ Sourcemod plugin for Neotokyo that provides the ability to setup rectangular axi
 # How it works  
 - When a player picks up the Ghost and is touching the ground, that point will continously be updated as the last known valid position for the ghost
 - If the the Ghost is then dropped into a Ghost Clip volume, it will teleport to that last valid position
-- Upon teleportation the Ghost will have it's motion freezed for 3s, it cannot be moved at all but it can be picked up again, unfortunately there's no notice to players currently of this
-- After 3s it will remain frozen in place, meaning it shouldn't fall of a ledge etc by itself, but will now respond to external forces like explosions
+- Upon teleportation the Ghost will appear to have it's motion frozen, but it will still respond to explosive forces etc
 - Currently there is a small quirk where bhopping might mean that the last valid position is much further back than expected due to the timing of the recording vs the hop
 - Ghost can still be held inside a Ghost Clip volume currently, it is not forcibly dropped
 - More than 32 volumes are not supported
