@@ -5,10 +5,10 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG true
+#define DEBUG false
 #define MAX_GHOST_AREAS 32
 
-Handle g_moveTimer;
+Handle g_findGhostTimer;
 
 char g_tag[] = "[Ghost Clip]";
 char g_teleSound[] = "gameplay/ghost_pickup.wav";
@@ -36,7 +36,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.2.1",
+	version = "0.2.3",
 	url = "",
 };
 
@@ -50,7 +50,6 @@ public void OnPluginStart()
 {
 	#if DEBUG
 	RegConsoleCmd("sm_fghost", FindGhostCommand);
-	RegConsoleCmd("sm_fvec", FindVec);
 	#endif
 	
 	if(g_lateLoad)
@@ -63,51 +62,6 @@ public void OnPluginStart()
 public Action FindGhostCommand(int client, int args)
 {
 	FindTheGhost();
-	
-	return Plugin_Handled;
-}
-
-public Action FindVec(int client, int args)
-{
-	PrintToServer("finding ent");
-	
-	g_ghostClipAreaCount = 0;
-	
-	int ent = -1;
-	char buffer[64];
-	
-	while ((ent = FindEntityByClassname(ent, "trigger_multiple")) != -1)
-	{
-		if (g_ghostClipAreaCount > MAX_GHOST_AREAS)
-		{
-			LogError("%s Error: More than 32 areas in GhostClip file", g_tag);
-			break;
-		}
-				
-		GetEntPropString(ent, Prop_Data, "m_iName", buffer, sizeof(buffer));
-		
-		if (StrContains(buffer, "ghost_clip", false) == 0)
-		{
-			PrintToServer("found ent %d", ent);
-		
-			float origin[3], mins[3], maxs[3];
-			
-			GetEntPropVector(ent, Prop_Data, "m_vecOrigin", origin);
-			GetEntPropVector(ent, Prop_Data, "m_vecMins", mins);
-			GetEntPropVector(ent, Prop_Data, "m_vecMaxs", maxs);
-	
-			PrintToServer("Trigger %d: mins %.1f %.1f %.1f  maxs %.1f %.1f %.1f origin: %.1f %.1f %.1f", 
-			ent, mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], origin[0], origin[1], origin[2]);
-			
-			for (int i = 0; i < 3; i++)
-			{
-				g_ghostClipAreasMins[g_ghostClipAreaCount][i] = origin[i] + mins[i];
-				g_ghostClipAreasMaxs[g_ghostClipAreaCount][i] = origin[i] + maxs[i];
-			}
-			
-			g_ghostClipAreaCount++;
-		}
-	}
 	
 	return Plugin_Handled;
 }
@@ -147,22 +101,12 @@ public void OnGameFrame()
 		return;
 	}
 	
-	if(g_freezeGhost)
-	{
-		FreezeGhost();
-	}
-	
 	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost))
 	{
 		return;
 	}
 	
 	CheckGhostPos();
-}
-
-void FreezeGhost()
-{
-	TeleportEntity(g_ghost, g_freezeGhostPos, {0.0, 90.0, 270.0}, {0.0, 0.0, 0.0});
 }
 
 void CheckGhostPos()
@@ -213,7 +157,7 @@ void CheckGhostPos()
 		{
 			g_ghostCarried = false; // its not carried as we teleport it now - might be carried again upon teleport finish
 			
-			TeleportEntity(g_ghost, g_ghostLastSafePos, {0.0, 90.0, 270.0}, {0.0, 0.0, 0.0});
+			TeleportEntity(g_ghost, g_ghostLastSafePos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
 			
 			for(int i = 0; i < 3; i++)
 			{
@@ -242,7 +186,7 @@ void CheckGhostPos()
 			
 			g_ghostCarried = false; // its not carried as we teleport it now - might be carried again upon teleport finish
 			
-			TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 90.0, 270.0}, {0.0, 0.0, 0.0});
+			TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
 			
 			#if DEBUG
 			PrintToServer("%s Teleporting to Spawn %.3f %.3f %.3f", g_tag, g_ghostSpawnPos[0], g_ghostSpawnPos[1], g_ghostSpawnPos[2]);
@@ -260,42 +204,27 @@ void CheckGhostPos()
 		PrintToServer("%s Teleporting", g_tag);
 		#endif
 		
+		// we just teleported to either spawn or last safe pos
+		// now we need to "freeze" it so it doesn't fall back of a ledge or something
+		
 		g_freezeGhost = true;
 		
 		if(spawnTele)
 		{
-			g_freezeGhostPos[0] = g_ghostSpawnPos[0];
-			g_freezeGhostPos[1] = g_ghostSpawnPos[1];
-			g_freezeGhostPos[2] = g_ghostSpawnPos[2];
+			for(int i = 0; i < 3; i++)
+			{
+				g_freezeGhostPos[i] = g_ghostSpawnPos[i];
+			}
 		}
 		else
 		{
-			g_freezeGhostPos[0] = g_ghostLastSafePos[0];
-			g_freezeGhostPos[1] = g_ghostLastSafePos[1];
-			g_freezeGhostPos[2] = g_ghostLastSafePos[2];
+			for(int i = 0; i < 3; i++)
+			{
+				g_freezeGhostPos[i] = g_ghostLastSafePos[i];
+			}
 		}
 		
-		//SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
-		//SetEntPropFloat(g_ghost, Prop_Data, "m_flGravity
-		
-		//SetEntityMoveType(g_ghost, MOVETYPE_NONE); 
-		// could be exploitable somehow since it doesnt respond to explosives, lets reset it after 3s?
-		// seems to hold 0 grav after 3s but still able to be moved by explosives... better way to achieve this?
-		
-		if(IsValidHandle(g_moveTimer))
-		{
-			#if DEBUG
-			PrintToServer("%s Already valid move timer handle, deleting", g_tag);
-			#endif
-			
-			delete g_moveTimer;
-		}
-	
-		#if DEBUG
-		PrintToServer("%s Creating move timer", g_tag);
-		#endif
-	
-		//g_moveTimer = CreateTimer(3.0, ResetGhostMoveType, _, TIMER_FLAG_NO_MAPCHANGE);
+		FreezeGhost();
 		
 		if(GetGameTime() > g_lastSound + 1.0)
 		{
@@ -313,28 +242,18 @@ void CheckGhostPos()
 		g_doneTeleOnce = true;
 	}
 }
-	
-public Action ResetGhostMoveType(Handle timer)
-{
-	// bug: when it wakes up it will immediately fall to the floor in 1 tick bypassing all checks
-	
-	if(g_ghost <= 0 || !IsValidEntity(g_ghost))
-	{
-		return Plugin_Stop;
-	}
-	
-	int carrier = GetEntPropEnt(g_ghost, Prop_Data, "m_hOwnerEntity");
-	
-	if(carrier <= 0)
-	{
-		#if DEBUG
-		PrintToServer("%s Resetting ghost move type, carrier: %d", g_tag, carrier);
-		#endif
-		
-		SetEntityMoveType(g_ghost, MOVETYPE_VPHYSICS);
-	}
 
-	return Plugin_Stop;
+void FreezeGhost()
+{
+	if(!g_freezeGhost || g_ghost <= 0)
+	{
+		return;
+	}
+	
+	float none[3];
+	
+	TeleportEntity(g_ghost, g_freezeGhostPos, none, none);
+	RequestFrame(FreezeGhost);
 }
 
 bool IsInsideArea(float pos[3])
@@ -360,7 +279,7 @@ public void OnMapStart()
 {
 	PrecacheSound(g_teleSound);
 	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
-	LoadGhostClips();
+	LoadGhostClips(); // can't detect trigger vecs on mapinit
 }
 
 public Action RecordGhosterPos(Handle timer)
@@ -397,10 +316,12 @@ public Action RecordGhosterPos(Handle timer)
 			g_ghostLastSafePos[i] = clientOrigin[i];
 		}
 		
+		// constant tele method makes it appear on it's side for some reason
+		// so we need a little height to stop it from being partially in the ground
 		#if DEBUG
-		g_ghostLastSafePos[2] += 32.0;
+		g_ghostLastSafePos[2] += 16.0;
 		#else
-		g_ghostLastSafePos[2] += 3.0;
+		g_ghostLastSafePos[2] += 6.0;
 		#endif
 		
 		g_recordedSafePos = true;
@@ -411,8 +332,6 @@ public Action RecordGhosterPos(Handle timer)
 
 public void OnMapInit()
 {
-	//LoadGhostClips(); // can't check ents here...need to use mapstart
-	
 	if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
 	{
 		SetFailState("%s Error: Failed to hook round start", g_tag);
@@ -545,12 +464,17 @@ public void LoadGhostClips()
 
 public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroadcast)
 {
-	// dunno what happens if a player picks it up before 0.5s - shud be ok as we can still find ghost
-	// but pos will be of the player instead...
-	
 	#if DEBUG
 	PrintToServer("%s Round Start", g_tag);
 	#endif
+	
+	if(g_ghost > 0 && IsValidEntity(g_ghost))
+	{
+		SDKUnhook(g_ghost, SDKHook_OnTakeDamage, OnGhostDamage);
+		#if DEBUG
+		PrintToServer("%s Unhooking ghost", g_tag);
+		#endif
+	}
 	
 	g_freezeGhost = false;
 	
@@ -564,7 +488,14 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 	g_recordedSafePos = false;
 	g_doneTeleOnce = false;
 	
-	CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
+	if(IsValidHandle(g_findGhostTimer))
+	{
+		delete g_findGhostTimer;
+	}
+	
+	// dunno what happens if a player picks it up before 0.5s - shud be ok as we can still find ghost
+	// but pos will be of the player instead...
+	g_findGhostTimer = CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
 	
 	return Plugin_Continue;
 }
@@ -582,20 +513,6 @@ public void OnMapEnd()
 	{
 		g_oldGhostPos[i] = 76543.0;
 	}
-}
-
-public void OnGhostSpawn(int ghost)
-{
-	// dunno what happens if a player picks it up before 0.5s - shud be ok as we can still find ghost
-	// but pos will be of the player instead...
-	
-	#if DEBUG
-	PrintToServer("%s Ghost spawned %d!", g_tag, ghost);
-	#endif
-	
-	g_freezeGhost = false;
-	g_ghostCarried = false; // its not carried yet - might be carried again upon spawn finish
-	CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action FindGhostTimer(Handle timer)
@@ -628,15 +545,59 @@ void FindTheGhost()
 		{
 			PrintToServer("%s Error hooking ghost damage", g_tag);
 		}
+		#if DEBUG
+		else
+		{
+			PrintToServer("%s Hooking ghost", g_tag);
+		}
+		#endif
 	}
 }
+
 public Action OnGhostDamage(int victim, int& attacker, int& inflictor, float& damage, int& damagetype, int& weapon, float damageForce[3], float damagePosition[3])
 {
 	g_freezeGhost = false;
 	
+	#if DEBUG
 	PrintToServer("%s Ghost was DAMAGED!", g_tag);
-	
+	#endif
 	return Plugin_Continue;
+}
+
+public void OnGhostSpawn(int ghost)
+{
+	#if DEBUG
+	PrintToServer("%s Ghost spawned %d!", g_tag, ghost);
+	#endif
+	
+	g_freezeGhost = false;
+	g_ghostCarried = false; // its not carried yet - might be carried again upon spawn finish
+	
+	if(IsValidHandle(g_findGhostTimer))
+	{
+		delete g_findGhostTimer;
+	}
+	
+	// dunno what happens if a player picks it up before 0.5s - shud be ok as we can still find ghost
+	// but pos will be of the player instead...
+	g_findGhostTimer = CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public void OnEntityDestroyed(int entity)
+{
+	char buf[16];
+	
+	GetEntityClassname(entity, buf, sizeof(buf));
+	
+	if(StrEqual(buf, "weapon_ghost", false))
+	{
+		g_ghost = -1;
+		
+		// we don't need to unhook, it's automatic on entity removal
+		#if DEBUG
+		PrintToServer("%s Ghost was DESTROYED!", g_tag);
+		#endif
+	}
 }
 
 public void OnGhostPickUp(int carrier)
@@ -666,5 +627,5 @@ public void OnGhostCapture(int client)
 	#endif
 	
 	g_freezeGhost = false;
-	g_ghost = -1;
+	//g_ghost = -1; // don't do this here
 }
