@@ -36,7 +36,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.2.3",
+	version = "0.2.5",
 	url = "",
 };
 
@@ -54,7 +54,7 @@ public void OnPluginStart()
 	
 	if(g_lateLoad)
 	{
-		OnMapInit(); // doesn't seem like you need to also call mapstart or cfgs, as they are called again on plugin load
+		//OnMapInit(); // doesn't seem like you need to also call mapstart or cfgs, as they are called again on plugin load
 	}
 }
 
@@ -277,8 +277,6 @@ bool IsInsideArea(float pos[3])
 
 public void OnMapStart()
 {
-	PrecacheSound(g_teleSound);
-	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT); // move this to loadclips so we dont need to fail the plugin
 	LoadGhostClips(); // can't detect trigger vecs on mapinit
 }
 
@@ -330,14 +328,6 @@ public Action RecordGhosterPos(Handle timer)
 	return Plugin_Continue;
 }
 
-public void OnMapInit()
-{
-	if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
-	{
-		SetFailState("%s Error: Failed to hook round start", g_tag);
-	}
-}
-
 public void LoadGhostClips()
 {
 	#if DEBUG
@@ -384,6 +374,18 @@ public void LoadGhostClips()
 	
 	if(g_ghostClipAreaCount > 0)
 	{	
+		if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
+		{
+			SetFailState("%s Error: Failed to hook round start", g_tag);
+		}
+		
+		PrecacheSound(g_teleSound);
+		CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+		
+		#if DEBUG
+		PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
+		#endif
+		
 		return; // we found ghost triggers we wont try to load anything from the cfg file
 	}
 	
@@ -400,14 +402,9 @@ public void LoadGhostClips()
 	
 	if (!kv.ImportFromFile(path))
 	{
-		#if !DEBUG
-		SetFailState("%s Error: Ghost clip file not found", g_tag);
-		#endif
+		PrintToServer("%s Ghost clip file not found", g_tag);
+		return;
 	}
-	
-	#if DEBUG
-	PrintToServer("%s Found areas", g_tag);
-	#endif
 		
 	if (kv.JumpToKey(g_mapName, false)) // go into the current map section
 	{
@@ -443,27 +440,41 @@ public void LoadGhostClips()
 		}
 		else
 		{
-			#if !DEBUG
-			SetFailState("%s Map had no areas defined in GhostClip file", g_tag);
-			#endif
+			PrintToServer("%s Map had no areas defined in GhostClip file", g_tag);
+			return;
 		}
 	}
 	else
 	{
-		#if !DEBUG
-		SetFailState("%s Map not found in GhostClip file", g_tag);
-		#endif
+		PrintToServer("%s Map not found in GhostClip file", g_tag);
+		return;
 	}
 	
 	delete kv;
 	
-	#if DEBUG
-	PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
-	#endif
+	if(g_ghostClipAreaCount > 0)
+	{	
+		if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
+		{
+			SetFailState("%s Error: Failed to hook round start", g_tag);
+		}
+		
+		PrecacheSound(g_teleSound);
+		CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+		
+		#if DEBUG
+		PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
+		#endif
+	}
 }
 
 public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroadcast)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return Plugin_Continue;
+	}
+	
 	#if DEBUG
 	PrintToServer("%s Round Start", g_tag);
 	#endif
@@ -502,6 +513,11 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 
 public void OnMapEnd()
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	g_freezeGhost = false;
 	g_ghostClipAreaCount = 0;
 	g_ghost = -1;
@@ -513,6 +529,12 @@ public void OnMapEnd()
 	{
 		g_oldGhostPos[i] = 76543.0;
 	}
+	
+	UnhookEvent("game_round_start", Event_RoundStartPre, EventHookMode_Pre); // should be hooked if the count was > 0
+	
+	#if DEBUG
+	PrintToServer("%s Unhooking on map end", g_tag);
+	#endif
 }
 
 public Action FindGhostTimer(Handle timer)
@@ -523,6 +545,11 @@ public Action FindGhostTimer(Handle timer)
 
 void FindTheGhost()
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	int ghost = FindEntityByClassname(-1, "weapon_ghost");
 	
 	if(ghost <= 0)
@@ -566,6 +593,11 @@ public Action OnGhostDamage(int victim, int& attacker, int& inflictor, float& da
 
 public void OnGhostSpawn(int ghost)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	#if DEBUG
 	PrintToServer("%s Ghost spawned %d!", g_tag, ghost);
 	#endif
@@ -585,6 +617,11 @@ public void OnGhostSpawn(int ghost)
 
 public void OnEntityDestroyed(int entity)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	char buf[16];
 	
 	GetEntityClassname(entity, buf, sizeof(buf));
@@ -602,6 +639,11 @@ public void OnEntityDestroyed(int entity)
 
 public void OnGhostPickUp(int carrier)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	#if DEBUG
 	PrintToChatAll("%N (%d) picked up the ghost!", carrier, carrier);
 	#endif
@@ -612,6 +654,11 @@ public void OnGhostPickUp(int carrier)
 
 public void OnGhostDrop(int client)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	#if DEBUG
 	PrintToChatAll("%N (%d) dropped the ghost!", client, client);
 	#endif
@@ -622,6 +669,11 @@ public void OnGhostDrop(int client)
 
 public void OnGhostCapture(int client)
 {
+	if(g_ghostClipAreaCount == 0)
+	{
+		return;
+	}
+	
 	#if DEBUG
 	PrintToChatAll("%N (%d) retrieved the ghost!", client, client);
 	#endif
