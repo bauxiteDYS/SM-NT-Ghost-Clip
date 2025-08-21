@@ -114,6 +114,7 @@ public void OnGameFrame()
 {
 	#if DEBUG
 	static float oldPos[3];
+	static float lastPrint;
 	
 	if(g_ghost > 0 && IsValidEntity(g_ghost))
 	{
@@ -121,14 +122,19 @@ public void OnGameFrame()
 
 		GetEntPropVector(g_ghost, Prop_Data, "m_vecAbsOrigin", ghostPos);
 		
-		if(!(oldPos[0] == ghostPos[0] && oldPos[1] == ghostPos[1] && oldPos[2] == ghostPos[2]))
+		if(GetGameTime() < lastPrint + 3.0)
 		{
-			for(int i = 0; i < 3; i++)
+			if(!(oldPos[0] == ghostPos[0] && oldPos[1] == ghostPos[1] && oldPos[2] == ghostPos[2]))
 			{
-				oldPos[i] = ghostPos[i];
-			}
+				for(int i = 0; i < 3; i++)
+				{
+					oldPos[i] = ghostPos[i];
+				}
 			
-			PrintToServer("%s GHOST HAS MOVED - %d", g_tag, GetGameTickCount());
+				PrintToServer("%s GHOST HAS MOVED - %d", g_tag, GetGameTickCount());
+			
+				lastPrint = GetGameTime();
+			}
 		}
 	}
 	#endif
@@ -219,6 +225,10 @@ void CheckGhostPos()
 			g_ghostCarried = false; // its not carried as we teleport it now - might be carried again upon teleport finish
 			
 			TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 90.0, 270.0}, {0.0, 0.0, 0.0});
+			
+			#if DEBUG
+			PrintToServer("%s Teleporting to Spawn %.3f %.3f %.3f", g_tag, g_ghostSpawnPos[0], g_ghostSpawnPos[1], g_ghostSpawnPos[2]);
+			#endif
 			
 			for(int i = 0; i < 3; i++)
 			{
@@ -509,11 +519,13 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 		g_oldGhostPos[i] = 76543.0;
 	}
 	
+	g_ghost = -1;
 	g_ghostCarried = false; // its not carried yet
 	g_recordedSafePos = false;
 	g_doneTeleOnce = false;
 	
 	CreateTimer(0.5, FindGhostTimer,_, TIMER_FLAG_NO_MAPCHANGE);
+	
 	return Plugin_Continue;
 }
 
@@ -537,7 +549,7 @@ public void OnGhostSpawn(int ghost)
 	// but pos will be of the player instead...
 	
 	#if DEBUG
-	PrintToChatAll("%s Ghost spawned %d!", g_tag, ghost);
+	PrintToServer("%s Ghost spawned %d!", g_tag, ghost);
 	#endif
 	
 	g_ghostCarried = false; // its not carried yet - might be carried again upon spawn finish
