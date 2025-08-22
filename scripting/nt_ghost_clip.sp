@@ -5,15 +5,19 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define DEBUG false
+#define DEBUG true
 #define MAX_GHOST_AREAS 32
+#define MAX_GHOST_SAMPLES 600
 
+Handle g_pastGhostTimer;
 Handle g_findGhostTimer;
 
 char g_tag[] = "[Ghost Clip]";
 char g_teleSound[] = "gameplay/ghost_pickup.wav";
 char g_mapName[32];
 
+float g_lastDropTime;
+float g_pastGhostPos[MAX_GHOST_SAMPLES][3];
 float g_freezeGhostPos[3];
 float g_lastSound;
 float g_oldGhostPos[3] = {76543.0, 76543.0, 76543.0}; //impossible coordinates
@@ -23,9 +27,12 @@ float g_ghostLastSafePos[3];
 float g_ghostClipAreasMins[MAX_GHOST_AREAS][3];
 float g_ghostClipAreasMaxs[MAX_GHOST_AREAS][3];
 
+int g_lastCarrier;
+int g_pastGhostCount = -1;
 int g_ghost = -1;
 int g_ghostClipAreaCount;
 
+bool g_replaying;
 bool g_freezeGhost;
 bool g_ghostCarried;
 bool g_recordedSafePos;
@@ -36,7 +43,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.2.5",
+	version = "0.3.0",
 	url = "",
 };
 
@@ -54,8 +61,42 @@ public void OnPluginStart()
 	
 	if(g_lateLoad)
 	{
-		//OnMapInit(); // doesn't seem like you need to also call mapstart or cfgs, as they are called again on plugin load
+		for(int i = 1; i <= MaxClients; i++)
+		{
+			if(IsClientInGame(i) && !IsFakeClient(i))
+			{
+				OnClientPutInServer(i);
+			}
+		}
 	}
+}
+
+public void OnClientPutInServer(int client)
+{
+	SDKHook(client, SDKHook_WeaponEquip, OnWeaponEquip);
+}
+
+public Action OnWeaponEquip(int client, int weapon)
+{
+	char buf[16];
+	GetEntityClassname(weapon, buf, sizeof(buf));
+	
+	if(StrEqual(buf, "weapon_ghost", false))
+	{
+		if(g_lastCarrier == client)
+		{
+			if(GetGameTime() > g_lastDropTime + 3.0)
+			{
+				return Plugin_Continue;
+			}
+			else
+			{
+				return Plugin_Handled;
+			}
+		}
+	}
+	
+	return Plugin_Continue;
 }
 
 #if DEBUG
@@ -101,7 +142,7 @@ public void OnGameFrame()
 		return;
 	}
 	
-	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost))
+	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost) || g_replaying)
 	{
 		return;
 	}
@@ -157,7 +198,23 @@ void CheckGhostPos()
 		{
 			g_ghostCarried = false; // its not carried as we teleport it now - might be carried again upon teleport finish
 			
-			TeleportEntity(g_ghost, g_ghostLastSafePos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+			if(g_pastGhostCount > 0 && !g_replaying)
+			{
+				if(IsValidHandle(g_pastGhostTimer))
+				{
+					delete g_pastGhostTimer;
+				}
+				g_replaying = true;
+				g_pastGhostTimer = CreateTimer(0.1, ReplayPastGhost, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+			}
+			else if (!g_replaying)
+			{
+				TeleportEntity(g_ghost, g_ghostLastSafePos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+			}
+			else
+			{
+				return;
+			}
 			
 			for(int i = 0; i < 3; i++)
 			{
@@ -186,7 +243,24 @@ void CheckGhostPos()
 			
 			g_ghostCarried = false; // its not carried as we teleport it now - might be carried again upon teleport finish
 			
-			TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+			if(g_pastGhostCount > 0 && !g_replaying)
+			{
+				if(IsValidHandle(g_pastGhostTimer))
+				{
+					delete g_pastGhostTimer;
+				}
+				
+				g_replaying = true;
+				g_pastGhostTimer = CreateTimer(0.1, ReplayPastGhost, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+			}
+			else if (!g_replaying)
+			{
+				TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}); // we should always have a spawn pos...
+			}
+			else
+			{
+				return;
+			}
 			
 			#if DEBUG
 			PrintToServer("%s Teleporting to Spawn %.3f %.3f %.3f", g_tag, g_ghostSpawnPos[0], g_ghostSpawnPos[1], g_ghostSpawnPos[2]);
@@ -209,18 +283,28 @@ void CheckGhostPos()
 		
 		g_freezeGhost = true;
 		
-		if(spawnTele)
+		if(g_pastGhostCount <= 0)
 		{
-			for(int i = 0; i < 3; i++)
+			if(spawnTele)
 			{
-				g_freezeGhostPos[i] = g_ghostSpawnPos[i];
+				for(int i = 0; i < 3; i++)
+				{
+					g_freezeGhostPos[i] = g_ghostSpawnPos[i];
+				}
+			}
+			else
+			{
+				for(int i = 0; i < 3; i++)
+				{
+					g_freezeGhostPos[i] = g_ghostLastSafePos[i];
+				}
 			}
 		}
 		else
 		{
 			for(int i = 0; i < 3; i++)
 			{
-				g_freezeGhostPos[i] = g_ghostLastSafePos[i];
+				g_freezeGhostPos[i] = g_pastGhostPos[g_pastGhostCount - 1][i];
 			}
 		}
 		
@@ -243,9 +327,60 @@ void CheckGhostPos()
 	}
 }
 
+public Action ReplayPastGhost(Handle timer)
+{
+	if(!g_replaying || g_ghost <= 0 || g_ghostCarried)
+	{
+		return Plugin_Stop;
+	}
+	
+	if(g_pastGhostCount > 0 && g_pastGhostCount < MAX_GHOST_SAMPLES)
+	{
+		for(int i = 0; i < 3; i++)
+		{
+			g_freezeGhostPos[i] = g_pastGhostPos[g_pastGhostCount - 1][i];
+		}
+		
+		g_pastGhostCount--;
+	}
+	else
+	{
+		g_pastGhostCount = -1;
+		
+		if(g_recordedSafePos)
+		{
+			TeleportEntity(g_ghost, g_ghostLastSafePos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+			
+			for(int i = 0; i < 3; i++)
+			{
+				g_freezeGhostPos[i] = g_ghostLastSafePos[i];
+			}
+			
+			g_replaying = false;
+			
+			return Plugin_Stop;
+		}
+		else
+		{
+			TeleportEntity(g_ghost, g_ghostSpawnPos, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+			
+			for(int i = 0; i < 3; i++)
+			{
+				g_freezeGhostPos[i] = g_ghostSpawnPos[i];
+			}
+			
+			g_replaying = false;
+			
+			return Plugin_Stop;
+		}
+	}
+	
+	return Plugin_Continue;
+}
+
 void FreezeGhost()
 {
-	if(!g_freezeGhost || g_ghost <= 0)
+	if(!g_freezeGhost || g_ghost <= 0 || g_ghostCarried)
 	{
 		return;
 	}
@@ -300,11 +435,34 @@ public Action RecordGhosterPos(Handle timer)
 	
 	if(IsInsideArea(clientOrigin))
 	{
+		if(!g_replaying)
+		{
+			if(g_pastGhostCount == -1)
+			{
+				g_pastGhostCount = 0;
+			}
+		
+			if(g_pastGhostCount > -1 && g_pastGhostCount < MAX_GHOST_SAMPLES - 1)
+			{
+				for(int i = 0; i < 3; i++)
+				{
+					g_pastGhostPos[g_pastGhostCount][i] = clientOrigin[i];
+				}
+			
+				g_pastGhostPos[g_pastGhostCount][2] += 12.0;
+			
+				g_pastGhostCount++;
+			}
+		}
+
 		return Plugin_Continue;
 	}
-
+	
 	if (GetEntityFlags(carrier) & FL_ONGROUND)
 	{
+		g_replaying = false;
+		g_pastGhostCount = -1;
+		
 		#if DEBUG
 		PrintToServer("recording ghost pos %d", GetGameTickCount());
 		#endif
@@ -487,6 +645,7 @@ public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroad
 		#endif
 	}
 	
+	g_replaying = false;
 	g_freezeGhost = false;
 	
 	for(int i = 0; i < 3; i++)
@@ -518,6 +677,7 @@ public void OnMapEnd()
 		return;
 	}
 	
+	g_replaying = false;
 	g_freezeGhost = false;
 	g_ghostClipAreaCount = 0;
 	g_ghost = -1;
@@ -578,12 +738,17 @@ void FindTheGhost()
 			PrintToServer("%s Hooking ghost", g_tag);
 		}
 		#endif
+		
+		g_pastGhostCount = -1;
 	}
 }
 
 public Action OnGhostDamage(int victim, int& attacker, int& inflictor, float& damage, int& damagetype, int& weapon, float damageForce[3], float damagePosition[3])
 {
-	g_freezeGhost = false;
+	if(!g_replaying)
+	{
+		g_freezeGhost = false;
+	}
 	
 	#if DEBUG
 	PrintToServer("%s Ghost was DAMAGED!", g_tag);
@@ -648,6 +813,8 @@ public void OnGhostPickUp(int carrier)
 	PrintToChatAll("%N (%d) picked up the ghost!", carrier, carrier);
 	#endif
 	
+	g_replaying = false;
+	g_pastGhostCount = -1;
 	g_freezeGhost = false;
 	g_ghostCarried = true;
 }
@@ -663,6 +830,8 @@ public void OnGhostDrop(int client)
 	PrintToChatAll("%N (%d) dropped the ghost!", client, client);
 	#endif
 	
+	g_lastCarrier = client;
+	g_lastDropTime = GetGameTime();
 	g_freezeGhost = false;
 	g_ghostCarried = false;
 }
@@ -678,6 +847,7 @@ public void OnGhostCapture(int client)
 	PrintToChatAll("%N (%d) retrieved the ghost!", client, client);
 	#endif
 	
+	g_pastGhostCount = -1;
 	g_freezeGhost = false;
 	//g_ghost = -1; // don't do this here
 }
