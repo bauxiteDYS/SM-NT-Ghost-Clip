@@ -38,7 +38,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.3.0",
+	version = "0.3.1",
 	url = "",
 };
 
@@ -81,7 +81,7 @@ public void OnGameFrame()
 
 		GetEntPropVector(g_ghost, Prop_Data, "m_vecAbsOrigin", ghostPos);
 		
-		if(GetGameTime() < lastPrint + 3.0)
+		if(GetGameTime() > lastPrint + 3.0)
 		{
 			if(!(oldPos[0] == ghostPos[0] && oldPos[1] == ghostPos[1] && oldPos[2] == ghostPos[2]))
 			{
@@ -103,7 +103,7 @@ public void OnGameFrame()
 		return;
 	}
 	
-	if(g_ghost <= 0 || g_ghostCarried || !IsValidEntity(g_ghost))
+	if(g_ghostCarried || g_ghost <= 0 || !IsValidEntity(g_ghost))
 	{
 		return;
 	}
@@ -119,19 +119,16 @@ void CheckGhostPos()
 			
 	if((g_oldGhostPos[0] == ghostPos[0] && g_oldGhostPos[1] == ghostPos[1] && g_oldGhostPos[2] == ghostPos[2]))
 	{
-		//if the ghost hasn't moved from last check, no need to recheck all areas
-		
 		#if DEBUG
 		static float lastPrint;
-		if(GetGameTime() < lastPrint + 3.0)
+		if(GetGameTime() > lastPrint + 3.0)
 		{
-			return;
+			PrintToServer("%s Ghost Hasn't Moved - %d", g_tag, GetGameTickCount());
+			lastPrint = GetGameTime();
 		}
-		PrintToServer("%s Ghost Hasn't Moved - %d", g_tag, GetGameTickCount());
-		lastPrint = GetGameTime();
 		#endif
 		
-		return;
+		return; //if the ghost hasn't moved from last check, no need to recheck all areas
 	}
 	
 	for(int i = 0; i < 3; i++)
@@ -141,7 +138,7 @@ void CheckGhostPos()
 	
 	#if DEBUG
 	static float lastPrint;
-	if(GetGameTime() < lastPrint + 3.0)
+	if(GetGameTime() > lastPrint + 3.0)
 	{
 		PrintToServer("%s Checking Ghost pos - %d", g_tag, GetGameTickCount());
 		lastPrint = GetGameTime();
@@ -151,7 +148,12 @@ void CheckGhostPos()
 	if (IsInsideArea(ghostPos))
 	{
 		#if DEBUG
-		PrintToServer("%d is inside an area - %d", g_ghost, GetGameTickCount());
+		static float lastPrint2;
+		if(GetGameTime() > lastPrint2 + 3.0)
+		{
+			PrintToServer("%d is inside an area - %d", g_ghost, GetGameTickCount());
+			lastPrint2 = GetGameTime();
+		}
 		#endif
 
 		if(g_recordedSafePos)
@@ -278,7 +280,7 @@ public void OnMapStart()
 
 public Action RecordGhosterPos(Handle timer)
 {
-	if(g_ghostClipAreaCount == 0 || g_ghost <= 0 || !g_ghostCarried || !IsValidEntity(g_ghost))
+	if(g_ghostClipAreaCount == 0 || !g_ghostCarried || g_ghost <= 0 || !IsValidEntity(g_ghost))
 	{
 		return Plugin_Continue;
 	}
@@ -287,6 +289,10 @@ public Action RecordGhosterPos(Handle timer)
 	
 	if(carrier <= 0 || !IsClientInGame(carrier) || !IsPlayerAlive(carrier))
 	{
+		#if DEBUG
+		PrintToServer("%s No carrier but ghost is marked as carried!?", g_tag);
+		#endif
+		
 		return Plugin_Continue;
 	}
 	
@@ -304,7 +310,12 @@ public Action RecordGhosterPos(Handle timer)
 	if (GetEntityFlags(carrier) & FL_ONGROUND)
 	{
 		#if DEBUG
-		PrintToServer("recording ghost pos %d", GetGameTickCount());
+		static float lastPrint;
+		if(GetGameTime() > lastPrint + 3.0)
+		{
+			PrintToServer("recording ghost pos %d", GetGameTickCount());
+			lastPrint = GetGameTime();
+		}
 		#endif
 		
 		for(int i = 0; i < 3; i++)
@@ -590,7 +601,8 @@ void FindTheGhost()
 		
 		if(!SDKHookEx(g_ghost, SDKHook_OnTakeDamage, OnGhostDamage))
 		{
-			PrintToServer("%s Error hooking ghost damage", g_tag);
+			PrintToChatAll("%s Error hooking ghost damage, plugin failed", g_tag);
+			SetFailState("%s Error hooking ghost damage", g_tag);
 		}
 		#if DEBUG
 		else
@@ -680,6 +692,7 @@ public void OnGhostDrop(int client)
 	}
 	
 	#if DEBUG
+	PrintToServer("%s Ghost has been DROPPED!", g_tag);
 	PrintToChatAll("%N (%d) dropped the ghost!", client, client);
 	#endif
 	
