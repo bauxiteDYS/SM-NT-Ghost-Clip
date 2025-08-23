@@ -25,6 +25,8 @@ float g_ghostClipAreasMaxs[MAX_GHOST_AREAS][3];
 
 int g_ghost = -1;
 int g_ghostClipAreaCount;
+int g_beam;
+int g_halo;
 
 bool g_freezeGhost;
 bool g_ghostCarried;
@@ -36,7 +38,7 @@ public Plugin myinfo = {
 	name = "NT Ghost Clip",
 	description = "Provides the ability to setup rectangular axis-aligned volumes where the ghost cannot be dropped into",
 	author = "bauxite",
-	version = "0.2.5",
+	version = "0.3.0",
 	url = "",
 };
 
@@ -111,7 +113,6 @@ public void OnGameFrame()
 
 void CheckGhostPos()
 {
-	bool spawnTele;
 	float ghostPos[3];
 
 	GetEntPropVector(g_ghost, Prop_Data, "m_vecAbsOrigin", ghostPos);
@@ -162,10 +163,7 @@ void CheckGhostPos()
 			for(int i = 0; i < 3; i++)
 			{
 				g_lastTelePos[i] = g_ghostLastSafePos[i];
-			}
-			
-			//spawnTele = false; // dont need this as it's already false
-			
+			}	
 		}
 		else // we dont have a recorded valid pos, doesnt mean ghost spawned in a clip though
 		{
@@ -196,8 +194,6 @@ void CheckGhostPos()
 			{
 				g_lastTelePos[i] = g_ghostSpawnPos[i];
 			}
-			
-			spawnTele = true;
 		}
 		
 		#if DEBUG
@@ -209,7 +205,7 @@ void CheckGhostPos()
 		
 		g_freezeGhost = true;
 		
-		if(spawnTele)
+		if(!g_recordedSafePos)
 		{
 			for(int i = 0; i < 3; i++)
 			{
@@ -232,7 +228,7 @@ void CheckGhostPos()
 			// but it could happen if nobody picks ghost up and somehow it enters a clip also
 			// explosions or shooting so idk if this is a good idea...
 			
-			if(g_doneTeleOnce || !spawnTele) 
+			if(g_doneTeleOnce || g_recordedSafePos) 
 			{
 				g_lastSound = GetGameTime();
 				EmitSoundToAll(g_teleSound, _, _, _, _, 0.6, 190);
@@ -300,9 +296,11 @@ public Action RecordGhosterPos(Handle timer)
 	
 	if(IsInsideArea(clientOrigin))
 	{
+		ShowTelePos();
+
 		return Plugin_Continue;
 	}
-
+	
 	if (GetEntityFlags(carrier) & FL_ONGROUND)
 	{
 		#if DEBUG
@@ -326,6 +324,31 @@ public Action RecordGhosterPos(Handle timer)
 	}
 
 	return Plugin_Continue;
+}
+
+void ShowTelePos()
+{
+	float pos[3];
+	
+	if(g_recordedSafePos)
+	{
+		for(int i = 0; i < 3; i++)
+		{
+			pos[i] = g_ghostLastSafePos[i];
+		}
+	}
+	else
+	{
+		for(int i = 0; i < 3; i++)
+		{
+			pos[i] = g_ghostSpawnPos[i];
+		}
+	}
+	
+	//(centr[3], floatStart, floatEnd, ModelIn, int HaloIn, StartFrame, FrameRate, Life, Width, Amplitude, Color[4], Speed, Flags)
+	TE_SetupBeamRingPoint(pos, 63.0, 64.0, g_beam, g_halo, 0, 1, 0.7, 2.0, 0.0, {255,255,255,255}, 1, FBEAM_STARTVISIBLE | FBEAM_ISACTIVE | FBEAM_SOLID);
+	//TE_SendToAll();
+	TE_SendToAllInRange(pos, RangeType_Visibility, 0.0);
 }
 
 public void LoadGhostClips()
@@ -374,18 +397,7 @@ public void LoadGhostClips()
 	
 	if(g_ghostClipAreaCount > 0)
 	{	
-		if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
-		{
-			SetFailState("%s Error: Failed to hook round start", g_tag);
-		}
-		
-		PrecacheSound(g_teleSound);
-		CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
-		
-		#if DEBUG
-		PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
-		#endif
-		
+		HookStuff();
 		return; // we found ghost triggers we wont try to load anything from the cfg file
 	}
 	
@@ -454,18 +466,26 @@ public void LoadGhostClips()
 	
 	if(g_ghostClipAreaCount > 0)
 	{	
-		if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
-		{
-			SetFailState("%s Error: Failed to hook round start", g_tag);
-		}
-		
-		PrecacheSound(g_teleSound);
-		CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
-		
-		#if DEBUG
-		PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
-		#endif
+		HookStuff();
 	}
+}
+
+void HookStuff()
+{
+	if(!HookEventEx("game_round_start", Event_RoundStartPre, EventHookMode_Pre))
+	{
+		SetFailState("%s Error: Failed to hook round start", g_tag);
+	}
+		
+	PrecacheSound(g_teleSound);
+	CreateTimer(0.1, RecordGhosterPos, _, TIMER_FLAG_NO_MAPCHANGE | TIMER_REPEAT);
+		
+	#if DEBUG
+	PrintToServer("%s Loaded %d areas", g_tag, g_ghostClipAreaCount);
+	#endif
+		
+	g_beam = PrecacheModel("materials/sprites/laserbeam.vmt");
+	g_halo = PrecacheModel("materials/sprites/halo01.vmt");	
 }
 
 public Action Event_RoundStartPre(Event event, const char[] name, bool dontBroadcast)
